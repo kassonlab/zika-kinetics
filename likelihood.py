@@ -8,16 +8,22 @@ class exp_data(object):
   """Experimental data."""
   __slots__ = ('counts_by_time', 'num_fused', 'num_not_fused',
                'unique_wait_times', 'measured_state')
-  def init():
+  def __init__(self):
     self.counts_by_time = []
     self.num_fused = 0
     self.num_not_fused = 0
     self.unique_wait_times = []
     self.measured_state = 0
 
+def make_expdat(dat):
+  """Helper function to compile exp_data.
+    args:  dat:  dict of data objects.
+    rets:  expdat:  exp_data object.
+  """
+
 class Model(object):
   """Kinetic model."""
-  def init(self, duration, start_vals):
+  def __init__(self, duration, start_vals):
     """Constructor.
     args:
       duration: time in sec to run model
@@ -63,7 +69,7 @@ class Model(object):
       log_prob:  log likelihood of observations given model
     """
 
-  def calc_nll(self, rate_constants, exp_data):
+  def calc_nll(self, rate_constants, dat):
     """Calculate negative log likelihood for a single model.
     args:
       rate_constants:  matrix of rate constants
@@ -72,9 +78,9 @@ class Model(object):
       nll:  negative log likelihood
     """
     (logvals, prob_notfused) = self.log_pdf_by_time(rate_constants,
-                                         exp_data.measured_state,
-                                         exp_data.unique_wait_times))
-    nll = numpy.sum(logvals * exp_data.counts_by_time)
+                                                    dat.measured_state,
+                                                    dat.unique_wait_times)
+    nll = numpy.sum(logvals * dat.counts_by_time)
     # need to make sure finite
-    nll += numpy.log(prob_notfused) * exp_data.num_not_fused
-
+    nll += numpy.log(prob_notfused) * dat.num_not_fused
+    return nll

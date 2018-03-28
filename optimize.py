@@ -3,6 +3,8 @@
 # Code 2018 by Peter Kasson
 
 import json
+import sys
+import gflags
 import numpy
 import scipy.optimize
 from scipy.io import loadmat
@@ -19,6 +21,7 @@ class ModelOptimizer(object):
     self.model = Model(timelength, self.startvals)
     testmat = numpy.ones((nstates, nstates))
     testmat[pinned] = 0
+    numpy.fill_diagonal(testmat, 0)
     self.unpinned_idx = numpy.nonzero(testmat)
     self.optmethod = 'CG'
     self.dat = []
@@ -52,7 +55,7 @@ class pHModelOptimizer(ModelOptimizer):
     # data format is JSON, key is pH, value is CDFData
     dat = json.load(open(dat_filename))
     self.pH = dat.keys()
-    self.dat = [make_expdat(x) for x in dat.values()]
+    self.dat = [make_expdat(y) for y in dat.values()]
 
   def __init__(self, nstates, timelength, pinned, pH_dep):
     """Constructor.
@@ -81,3 +84,23 @@ class pHModelOptimizer(ModelOptimizer):
     return numpy.sum([self.model.calc_nll(self.make_pHdep(rate_matrix, pH), dat)
                       / (dat.num_fused + dat.num_not_fused)
                       for (pH, dat) in zip(self.pH, self.dat)])
+
+if __name__ == '__main__':
+  FLAGS = gflags.FLAGS
+  gflags.DEFINE_string('expdata', 'expdat.json', 'Experimental data')
+  gflags.DEFINE_string('outfile', 'res.json', 'Output parameters')
+  gflags.DEFINE_integer('nstates', 3, 'Number of states')
+  gflags.DEFINE_integer('length', 300, 'Time in seconds')
+  gflags.DEFINE_string('pinned', '', 'Transitions that are invariate. '
+                       'Comma-separated list of a-b')
+  gflags.DEFINE_string('pHdep', '', 'Transitions that are pH-dependent')
+  argv = FLAGS(sys.argv)
+  pin_parse = [numpy.array(x.split('-'), dtype=int)
+               for x in FLAGS.pinned.split(',')] if FLAGS.pinned else []
+  pH_parse = [numpy.array(x.split('-'), dtype=int)
+              for x in FLAGS.pHdep.split(',')] if FLAGS.pHdep else []
+  opt = pHModelOptimizer(FLAGS.nstates, FLAGS.length, pin_parse, pH_parse)
+  (optparam, bestval) = opt.optimize()
+  outf = open(FLAGS.outfile, 'w')
+  json.dump(outf, {'params': optparam, 'nll': bestval})
+  outf.close()

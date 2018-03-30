@@ -68,8 +68,8 @@ class Model(object):
       conc_vals[:, i+1] = numpy.matmul(conc_vals[:, i], rate_constants)
     return conc_vals
 
-  def log_pdf_by_time(self, rate_constants, query_state, time_idx):
-    """Calculate log PDF for each time value in vector.
+  def pdf_by_time(self, rate_constants, query_state, time_idx):
+    """Calculate PDF for each time value in vector.
     args:
       rate_constants:  matrix of rate constants
       query_state:  which state to calculate PDF for
@@ -94,10 +94,11 @@ class Model(object):
     """
     # for the moment, hardcoding dt = 1; otherwise would want to do
     # dat.unique_wait_times/self.dt +1 below
-    (logvals, prob_notfused) = self.log_pdf_by_time(rate_constants,
-                                                    dat.measured_state,
-                                                    dat.unique_wait_times+1)
-    nll = numpy.sum(logvals * dat.counts_by_time)
+    (pdf_vals, prob_notfused) = self.pdf_by_time(rate_constants,
+                                                 dat.measured_state,
+                                                 dat.unique_wait_times+1)
+    safe_idx = numpy.nonzero(pdf_vals)
+    nll = numpy.sum(pdf_vals[safe_idx] * dat.counts_by_time[safe_idx])
     # need to make sure finite
     if prob_notfused > 0:
       nll += numpy.log(prob_notfused) * dat.num_not_fused

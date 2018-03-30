@@ -24,7 +24,9 @@ class ModelOptimizer(object):
       testmat[tuple(x-1)] = 0
     numpy.fill_diagonal(testmat, 0)
     self.unpinned_idx = numpy.nonzero(testmat)
-    self.optmethod = 'CG'
+    print 'Unpinned rates:'
+    print self.unpinned_idx
+    self.optmethod = 'BFGS'
     self.dat = []
 
   def load_data(self, dat_filename):
@@ -36,17 +38,24 @@ class ModelOptimizer(object):
   def mean_nll(self, rate_constants):
     print 'Define in subclass!'
 
-  def optimize(self, start_constants=None):
+  def optimize(self, start_constants=[]):
     """Optimize parameters given data.
     args: None
     rets:
       optimized_rates
       mean_nll
     """
-    if not start_constants:
+    if not len(start_constants):
       start_constants = numpy.ones(len(self.unpinned_idx[0]))
-    res = scipy.optimize.minimize(self.mean_nll, start_constants,
-                                  method=self.optmethod)
+      res = scipy.optimize.differential_evolution(self.mean_nll,
+                                                  bounds=[(0, 1e4), (0, 10),
+                                                          (0, 10), (0, 1),
+                                                          (0, 1)],
+                                                  disp=True)
+    else:
+      res = scipy.optimize.basinhopping(self.mean_nll, start_constants,
+                                        disp=True)
+    print res
     return (res.x, res.fun)
 
 class pHModelOptimizer(ModelOptimizer):
@@ -83,7 +92,8 @@ class pHModelOptimizer(ModelOptimizer):
     # construct rate matrix
     rate_matrix = numpy.zeros((self.nstates, self.nstates))
     rate_matrix[self.unpinned_idx] = rate_constants
-    return numpy.sum([self.model.calc_nll(self.make_pHdep(rate_matrix, pH), dat)
+    return numpy.sum([self.model.calc_nll(self.make_pHdep(rate_matrix, pH),
+                                          self.make_pHdep(rate_matrix, dat.eq_pH), dat)
                       / (dat.num_fused + dat.num_not_fused)
                       for (pH, dat) in zip(self.pH, self.dat)])
 
@@ -96,6 +106,7 @@ if __name__ == '__main__':
   gflags.DEFINE_string('pinned', '', 'Transitions that are invariate. '
                        'Comma-separated list of a-b')
   gflags.DEFINE_string('pHdep', '', 'Transitions that are pH-dependent')
+  gflags.DEFINE_string('startvals', '', 'Starting parameters')
   argv = FLAGS(sys.argv)
   pin_parse = [numpy.array(x.split('-'), dtype=int)
                for x in FLAGS.pinned.split(',')] if FLAGS.pinned else []
@@ -103,7 +114,11 @@ if __name__ == '__main__':
               for x in FLAGS.pHdep.split(',')] if FLAGS.pHdep else []
   opt = pHModelOptimizer(FLAGS.nstates, FLAGS.length, pin_parse, pH_parse)
   opt.load_data(FLAGS.expdata)
-  (optparam, bestval) = opt.optimize()
+  if FLAGS.startvals:
+    start_vals = numpy.array(FLAGS.startvals.split(','), dtype=float)
+  else:
+    start_vals = []
+  (optparam, bestval) = opt.optimize(start_vals)
   outf = open(FLAGS.outfile, 'w')
   json.dump({'params': list(optparam), 'nll': bestval}, outf)
   outf.close()

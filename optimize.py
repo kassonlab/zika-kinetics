@@ -56,7 +56,7 @@ class pHModelOptimizer(ModelOptimizer):
     """
     # data format is JSON, key is pH, value is CDFData
     dat = json.load(open(dat_filename))
-    self.pH = dat.keys()
+    self.pH = numpy.array(dat.keys(), dtype=float)
     self.dat = [make_expdat(y) for y in dat.values()]
 
   def __init__(self, nstates, timelength, pinned, pH_dep):

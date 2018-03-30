@@ -14,13 +14,14 @@ from likelihood import *
 class ModelOptimizer(object):
   """Optimizer for kinetic models."""
   def __init__(self, nstates, timelength, pinned=[]):
-    self.startvals = numpy.zeros((nstates, 1))
+    self.startvals = numpy.zeros(nstates)
     self.startvals[0] = 1
     self.nstates = nstates
     self.pinned = pinned
     self.model = Model(timelength, self.startvals)
     testmat = numpy.ones((nstates, nstates))
-    testmat[pinned] = 0
+    for x in pinned:
+      testmat[tuple(x-1)] = 0
     numpy.fill_diagonal(testmat, 0)
     self.unpinned_idx = numpy.nonzero(testmat)
     self.optmethod = 'CG'
@@ -28,8 +29,9 @@ class ModelOptimizer(object):
 
   def load_data(self, dat_filename):
     """Load experimental reference data."""
-    self.dat = loadmat(dat_filename)
+    # self.dat = loadmat(dat_filename)
     # leave this to be subclassed
+    print 'Define in subclass!'
 
   def mean_nll(self, rate_constants):
     print 'Define in subclass!'
@@ -73,7 +75,7 @@ class pHModelOptimizer(ModelOptimizer):
     """Multiply pH-dependent rate constants by pH."""
     pH_rates = rate_constants.copy()
     for idx in self.pH_dep:
-      pH_rates[idx] *= pH
+      pH_rates[tuple(idx-1)] *= pH
     return pH_rates
 
   def mean_nll(self, rate_constants):
@@ -100,7 +102,8 @@ if __name__ == '__main__':
   pH_parse = [numpy.array(x.split('-'), dtype=int)
               for x in FLAGS.pHdep.split(',')] if FLAGS.pHdep else []
   opt = pHModelOptimizer(FLAGS.nstates, FLAGS.length, pin_parse, pH_parse)
+  opt.load_data(FLAGS.expdata)
   (optparam, bestval) = opt.optimize()
   outf = open(FLAGS.outfile, 'w')
-  json.dump(outf, {'params': optparam, 'nll': bestval})
+  json.dump({'params': list(optparam), 'nll': bestval}, outf)
   outf.close()

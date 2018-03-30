@@ -16,7 +16,7 @@ class exp_data(object):
     self.measured_state = 0
     self.pdf = []
 
-def make_expdat(dat):
+def make_expdat(dat, time_bin=1):
   """Helper function to compile exp_data.
     args:  dat:  dict of data objects.
     rets:  expdat:  exp_data object.
@@ -26,12 +26,14 @@ def make_expdat(dat):
   # TimesToFusion (previously SortedpHtoFList)
   res.num_fused = len(dat['TimesToFusion'])
   res.num_not_fused = max(0, round((1-dat['Efficiency']) * res.num_fused))
-  res.measured_state = dat['FusionState']
-  res.unique_wait_times, res.counts_by_time = numpy.unique(dat['TimesToFusion'],
+  res.measured_state = int(dat['FusionState']) - 1  # make 0-indexed
+  binned_times = numpy.round(dat['TimesToFusion'] * time_bin) / time_bin
+  res.unique_wait_times, res.counts_by_time = numpy.unique(binned_times,
                                                            return_counts=True)
   # cumprob = numpy.cumsum(res.counts_by_time).astype(numpy.double)
   # now need PDF.  Do we normalize cumprob?
   # or do we just use the counts by time?
+  return res
 
 class Model(object):
   """Kinetic model."""
@@ -63,7 +65,7 @@ class Model(object):
     conc_vals = numpy.zeros((len(self.start_vals), self.duration+1))
     conc_vals[:, 0] = self.start_vals
     for i in range(self.duration):
-      conc_vals[i+1, :] = numpy.matmul(conc_vals[i, ], rate_constants)
+      conc_vals[:, i+1] = numpy.matmul(conc_vals[:, i], rate_constants)
     return conc_vals
 
   def log_pdf_by_time(self, rate_constants, query_state, time_idx):
@@ -79,8 +81,8 @@ class Model(object):
     model_conc = self.propagate(rate_constants)
     # now get PDF at time_vals for query_state
     # following gets full PDF; need to figure out if can get specific
-    model_pdf = numpy.trapz(model_conc[query_state, :], dx=self.dt)
-    return (model_pdf[time_idx], 1-model_conc[query_state, -1])
+    model_pdf = numpy.gradient(model_conc[query_state, :], self.dt)
+    return (model_pdf[time_idx.astype(int)], 1-model_conc[query_state, -1])
 
   def calc_nll(self, rate_constants, dat):
     """Calculate negative log likelihood for a single model.
@@ -97,5 +99,7 @@ class Model(object):
                                                     dat.unique_wait_times+1)
     nll = numpy.sum(logvals * dat.counts_by_time)
     # need to make sure finite
-    nll += numpy.log(prob_notfused) * dat.num_not_fused
+    if prob_notfused > 0:
+      nll += numpy.log(prob_notfused) * dat.num_not_fused
+    print nll
     return nll

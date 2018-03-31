@@ -71,7 +71,7 @@ class Model(object):
     # alternate:
     update = expm(rate_constants)
     conc_vals = numpy.zeros((len(self.start_vals), self.duration+1))
-    conc_vals[:, 0] = numpy.matmul(self.start_vals, expm(eq_rates, eq_time))
+    conc_vals[:, 0] = numpy.matmul(self.start_vals, expm(eq_rates * eq_time))
     for i in range(self.duration):
       conc_vals[:, i+1] = numpy.matmul(conc_vals[:, i], update)
     return conc_vals

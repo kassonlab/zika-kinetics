@@ -64,16 +64,13 @@ class Model(object):
     """
     for i in range(len(rate_constants)):
       rate_constants[i, i] = 0
+      eq_rates[i, i] = 0
       rate_constants[i, i] = -1 * sum(rate_constants[i, :])
+      eq_rates[i, i] = -1 * sum(eq_rates[i, :])
     if False:
       return odeint(lambda v, _t: numpy.matmul(v, rate_constants),
                     self.start_vals, range(self.duration+1)).transpose()
     # alternate:
-    update = expm(rate_constants)
-    conc_vals = numpy.zeros((len(self.start_vals), self.duration+1))
-    conc_vals[:, 0] = numpy.matmul(self.start_vals, expm(eq_rates * eq_time))
-    for i in range(self.duration):
-      conc_vals[:, i+1] = numpy.matmul(conc_vals[:, i], update)
     return conc_vals
 
   def pdf_by_time(self, rate_constants, eq_rates, eq_time,

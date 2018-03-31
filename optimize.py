@@ -84,7 +84,7 @@ class pHModelOptimizer(ModelOptimizer):
     """Multiply pH-dependent rate constants by pH."""
     pH_rates = rate_constants.copy()
     for idx in self.pH_dep:
-      pH_rates[tuple(idx-1)] *= pH
+      pH_rates[tuple(idx-1)] *= 10 ** pH
     return pH_rates
 
   def mean_nll(self, rate_constants):

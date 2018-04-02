@@ -30,7 +30,8 @@ def make_expdat(dat, time_bin=1):
   # dat should include EfficiencyBefore, optionally EffMax,
   # TimesToFusion (previously SortedpHtoFList)
   res.num_fused = len(dat['TimesToFusion'])
-  res.num_not_fused = max(0, round((1-dat['Efficiency']) * res.num_fused))
+  res.num_not_fused = (round(res.num_fused / dat['Efficiency'])
+                       if numpy.isfinite(dat['Efficiency']) else 1)
   res.measured_state = int(dat['FusionState']) - 1  # make 0-indexed
   binned_times = numpy.round(dat['TimesToFusion'] * time_bin) / time_bin
   res.unique_wait_times, res.counts_by_time = numpy.unique(binned_times,
@@ -97,7 +98,8 @@ class Model(object):
     model_pdf = numpy.gradient(model_conc[query_state, :], self.dt)
     # threshold small PDF values to zero
     model_pdf[numpy.abs(model_pdf) < 1e-10] = 0
-    return (model_pdf[time_idx.astype(int)], 1-model_conc[query_state, -1])
+    return (model_pdf[time_idx.astype(int)],
+            1 - model_conc[query_state, -1] / numpy.sum(model_conc[:, -1]))
 
   def calc_nll(self, rate_constants, eq_rates, dat):
     """Calculate negative log likelihood for a single model.
@@ -115,13 +117,15 @@ class Model(object):
                                                  dat.measured_state,
                                                  dat.unique_wait_times+1)
     logvals = numpy.log(pdf_vals)
-    nll = numpy.sum(numpy.array([x if numpy.isfinite(x) else -10
+    nll = -1 * numpy.sum(numpy.array([x if numpy.isfinite(x) else -20
                                  for x in logvals]) * dat.counts_by_time)
     # nll = numpy.sum(numpy.log(pdf_vals[safe_idx])
     #                 * dat.counts_by_time[safe_idx])
     # need to make sure finite
     if prob_notfused > 0 and numpy.isfinite(prob_notfused):
-      nll += numpy.log(prob_notfused) * dat.num_not_fused
+      nll -= numpy.log(prob_notfused) * dat.num_not_fused
+    else:
+      nll += 20 * dat.num_not_fused
     # print nll
     if not numpy.isfinite(nll):
       import pdb; pdb.set_trace()

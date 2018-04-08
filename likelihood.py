@@ -30,8 +30,8 @@ def make_expdat(dat, time_bin=1):
   # dat should include EfficiencyBefore, optionally EffMax,
   # TimesToFusion (previously SortedpHtoFList)
   res.num_fused = len(dat['TimesToFusion'])
-  res.num_not_fused = (round(res.num_fused / dat['Efficiency'])
-                       if numpy.isfinite(dat['Efficiency']) else 1)
+  res.num_not_fused = (round(res.num_fused / dat['EfficiencyCorrected'])
+                       if numpy.isfinite(dat['EfficiencyCorrected']) else 1)
   res.measured_state = int(dat['FusionState']) - 1  # make 0-indexed
   binned_times = numpy.round(dat['TimesToFusion'] * time_bin) / time_bin
   res.unique_wait_times, res.counts_by_time = numpy.unique(binned_times,
@@ -63,7 +63,7 @@ class Model(object):
     rets:
       conc_vals: matrix of concentrations at each time
     """
-    for i in range(len(rate_constants)):
+    for i in range(len(self.start_vals)):
       rate_constants[i, i] = 0
       eq_rates[i, i] = 0
       rate_constants[i, i] = -1 * sum(rate_constants[i, :])
@@ -80,7 +80,7 @@ class Model(object):
     return conc_vals
 
   def pdf_by_time(self, rate_constants, eq_rates, eq_time,
-                  query_state, time_idx):
+                  query_state, time_idx, eq_corr=True):
     """Calculate PDF for each time value in vector.
     args:
       rate_constants:  matrix of rate constants
@@ -88,6 +88,7 @@ class Model(object):
       eq_time:  length of equilibration
       query_state:  which state to calculate PDF for
       time_idx:  index values at which to calculate PDF
+      eq_corr:  subtract out fused during equilibration
     rets:
       pdf_val:  PDF values
       prob_notfused: probability not fused
@@ -98,8 +99,11 @@ class Model(object):
     model_pdf = numpy.gradient(model_conc[query_state, :], self.dt)
     # threshold small PDF values to zero
     model_pdf[numpy.abs(model_pdf) < 1e-10] = 0
+    # subtract out anything that fused during equilibration
+    sub_val = model_conc[query_state,0] if eq_corr else 0
     return (model_pdf[time_idx.astype(int)],
-            1 - model_conc[query_state, -1] / numpy.sum(model_conc[:, -1]))
+            1 - (model_conc[query_state, -1] - sub_val)
+            / (numpy.sum(model_conc[:, -1]) - sub_val))
 
   def calc_nll(self, rate_constants, eq_rates, dat):
     """Calculate negative log likelihood for a single model.

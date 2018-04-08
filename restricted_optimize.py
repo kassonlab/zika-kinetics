@@ -25,6 +25,14 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
     for v in pinned_vals:
       self.ratemat[int(v[0]) - 1, int(v[1]) - 1] = v[2]
 
+  def copy(self):
+    """Copy constructor."""
+    new_obj = RestrictedOptimizer(self.nstates, self.model.duration,
+              [p for p in self.pinned_vals], [v for v in self.pH_dep])
+    new_obj.pH = [p for p in self.pH]
+    new_obj.dat = [d for d in self.dat]
+    return new_obj
+
   def mean_nll(self, rate_constants):
     """Calculate mean NLL across models."""
     rate_matrix = self.ratemat.copy()
@@ -35,7 +43,7 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
                       / (dat.num_fused + dat.num_not_fused)
                       for (pH, dat) in zip(self.pH, self.dat)])
 
-  def eq_efficiency(self, rate_constants, test_all=True):
+  def eq_efficiency(self, rate_constants, test_all=True, eq_corr=True):
     """Calculate likelihood of equilibration efficiency."""
     rate_matrix = self.ratemat.copy()
     rate_matrix[self.unpinned_idx] = rate_constants
@@ -45,7 +53,10 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
       if test_all or (pH == dat.eq_pH):
         cur_matrix = self.make_pHdep(rate_matrix, pH)
         vals = self.model.propagate(cur_matrix, eq_matrix, dat.eq_time)
-        eff = vals[dat.measured_state, -1] / numpy.sum(vals[:, -1])
+        # subtract out anything that fused during equilibration
+        sub_val = vals[dat.measured_state, 0] if eq_corr else 0
+        eff = ((vals[dat.measured_state, -1] - sub_val)
+               / (numpy.sum(vals[:, -1]) - sub_val))
         not_fus = -1 * numpy.log(1 - eff) * dat.num_not_fused
         fus = -1 * numpy.log(eff) * dat.num_fused
         nll += ((not_fus if numpy.isfinite(not_fus)

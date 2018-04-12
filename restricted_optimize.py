@@ -17,6 +17,7 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
       pinned:  tuples of rates that are pinned and values
       pH_dep: list of rates that are pH-dependent.
      """
+    self.eq_corr = True
     self.pinned_vals = pinned_vals
     optimize.pHModelOptimizer.__init__(self, nstates, timelen,
                                        [v[:2].astype(int) for v in pinned_vals],
@@ -39,7 +40,8 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
     rate_matrix[self.unpinned_idx] = rate_constants
     return numpy.sum([self.model.calc_nll(self.make_pHdep(rate_matrix, pH),
                                           self.make_pHdep(rate_matrix,
-                                                          dat.eq_pH), dat)
+                                                          dat.eq_pH), dat,
+                                                          self.eq_corr)
                       / (dat.num_fused + dat.num_not_fused)
                       for (pH, dat) in zip(self.pH, self.dat)])
 
@@ -87,7 +89,7 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
                                                   disp=True)
     else:
       res = scipy.optimize.basinhopping(self.mean_nll, eq_res.x,
-                                        disp=True, niter=500,
+                                        disp=True, niter=1000,
                                         minimizer_kwargs={'bounds': bounds})
     print "After equilibration:"
     print eq_res
@@ -107,12 +109,15 @@ if __name__ == '__main__':
                        'Comma-separated list of a-b-val')
   gflags.DEFINE_string('pHdep', '', 'Transitions that are pH-dependent')
   gflags.DEFINE_string('startvals', '', 'Starting parameters')
+  gflags.DEFINE_bool('eq', True, 'Correct for equilibration')
   argv = FLAGS(sys.argv)
   pin_parse = [numpy.array(x.split('-'), dtype=float)
                for x in FLAGS.pinned.split(',')] if FLAGS.pinned else []
   pH_parse = [numpy.array(x.split('-'), dtype=int)
               for x in FLAGS.pHdep.split(',')] if FLAGS.pHdep else []
   opt = RestrictedOptimizer(FLAGS.nstates, FLAGS.length, pin_parse, pH_parse)
+  if not FLAGS.eq:
+    opt.eq_corr = False
   opt.load_data(FLAGS.expdata)
   if FLAGS.startvals:
     start_vals = numpy.array(FLAGS.startvals.split(','), dtype=float)

@@ -105,12 +105,13 @@ class Model(object):
             1 - (model_conc[query_state, -1] - sub_val)
             / (numpy.sum(model_conc[:, -1]) - sub_val))
 
-  def calc_nll(self, rate_constants, eq_rates, dat):
+  def calc_nll(self, rate_constants, eq_rates, dat, eq_corr=True):
     """Calculate negative log likelihood for a single model.
     args:
       rate_constants:  matrix of rate constants
       eq_rates:  rate matrix for equilibration
       exp_data: experimental data
+      eq_corr:  subtract out fused during equilibration
     rets:
       nll:  negative log likelihood
     """
@@ -119,7 +120,8 @@ class Model(object):
     (pdf_vals, prob_notfused) = self.pdf_by_time(rate_constants,
                                                  eq_rates, dat.eq_time,
                                                  dat.measured_state,
-                                                 dat.unique_wait_times+1)
+                                                 dat.unique_wait_times+1,
+                                                 eq_corr)
     logvals = numpy.log(pdf_vals)
     nll = -1 * numpy.sum(numpy.array([x if numpy.isfinite(x) else -20
                                  for x in logvals]) * dat.counts_by_time)

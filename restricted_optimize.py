@@ -34,6 +34,11 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
     new_obj.dat = [d for d in self.dat]
     return new_obj
 
+  def set_measured_state(self, state_idx):
+    """Set measured state index for each index in experimental data."""
+    for dat in self.dat:
+      dat.measured_state = state_idx -1
+
   def mean_nll(self, rate_constants):
     """Calculate mean NLL across models."""
     rate_matrix = self.ratemat.copy()
@@ -105,6 +110,7 @@ if __name__ == '__main__':
   gflags.DEFINE_string('outfile', 'res.json', 'Output parameters')
   gflags.DEFINE_integer('nstates', 3, 'Number of states')
   gflags.DEFINE_integer('length', 300, 'Time in seconds')
+  gflags.DEFINE_integer('fus_state', 3, 'State measured experimentally')
   gflags.DEFINE_string('pinned', '', 'Transitions that are invariate. '
                        'Comma-separated list of a-b-val')
   gflags.DEFINE_string('pHdep', '', 'Transitions that are pH-dependent')
@@ -119,6 +125,7 @@ if __name__ == '__main__':
   if not FLAGS.eq:
     opt.eq_corr = False
   opt.load_data(FLAGS.expdata)
+  opt.set_measured_state(FLAGS.fus_state)
   if FLAGS.startvals:
     start_vals = numpy.array(FLAGS.startvals.split(','), dtype=float)
   else:

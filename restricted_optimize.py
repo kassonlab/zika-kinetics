@@ -19,6 +19,7 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
      """
     self.eq_corr = True
     self.pinned_vals = pinned_vals
+    self.eq_pH = None
     optimize.pHModelOptimizer.__init__(self, nstates, timelen,
                                        [v[:2].astype(int) for v in pinned_vals],
                                        pH_dep)
@@ -54,10 +55,12 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
     """Calculate likelihood of equilibration efficiency."""
     rate_matrix = self.ratemat.copy()
     rate_matrix[self.unpinned_idx] = rate_constants
-    eq_matrix = self.make_pHdep(rate_matrix, self.dat[0].eq_pH)
+    eq_matrix = self.make_pHdep(rate_matrix,
+                                self.dat[0].eq_pH if not self.eq_pH else self.eq_pH)
     nll = 0
     for (pH, dat) in zip(self.pH, self.dat):
-      if test_all or (pH == dat.eq_pH):
+      target_pH = self.eq_pH if self.eq_pH else dat.eq_pH
+      if test_all or (pH == target_pH):
         cur_matrix = self.make_pHdep(rate_matrix, pH)
         vals = self.model.propagate(cur_matrix, eq_matrix, dat.eq_time)
         # subtract out anything that fused during equilibration
@@ -71,13 +74,14 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
                 + (fus if numpy.isfinite(fus) else 20 * dat.num_fused))
     return nll
 
-  def optimize(self, start_constants=[]):
+  def optimize(self, start_constants=[], skip_eq_pH=False, eq_pH=None):
     """Optimize parameters given data.
     args: None
     rets:
       optimized_rates
       mean_nll
     """
+    self.eq_pH = eq_pH
     if not len(start_constants):
       start_constants = numpy.ones(len(self.unpinned_idx[0]))*0.01
       start_constants[0] = 3000
@@ -86,6 +90,11 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
     eq_res = scipy.optimize.basinhopping(self.eq_efficiency, start_constants,
                                          disp=True, niter=1000,
                                         minimizer_kwargs={'bounds': bounds})
+    if skip_eq_pH:
+      # if this is set, don't optimize further for equilibration pH
+      eq_idx = numpy.where(self.dat[0].eq_pH)[0]
+      self.pH = numpy.delete(self.pH, eq_idx)
+      del self.dat[eq_idx]
     if False:
       # set up options for this
       res = scipy.optimize.differential_evolution(self.mean_nll,
@@ -115,7 +124,9 @@ if __name__ == '__main__':
                        'Comma-separated list of a-b-val')
   gflags.DEFINE_string('pHdep', '', 'Transitions that are pH-dependent')
   gflags.DEFINE_string('startvals', '', 'Starting parameters')
+  gflags.DEFINE_string('eff_pH', '', 'Specify efficiency fitting pH')
   gflags.DEFINE_bool('eq', True, 'Correct for equilibration')
+  gflags.DEFINE_bool('dont_fit_eq', False, 'Don\'t fit equilibratin pH')
   argv = FLAGS(sys.argv)
   pin_parse = [numpy.array(x.split('-'), dtype=float)
                for x in FLAGS.pinned.split(',')] if FLAGS.pinned else []
@@ -130,7 +141,16 @@ if __name__ == '__main__':
     start_vals = numpy.array(FLAGS.startvals.split(','), dtype=float)
   else:
     start_vals = []
-  (optparam, bestval) = opt.optimize(start_vals)
+  eff_pH = float(FLAGS.eff_pH) if FLAGS.eff_pH else None
+  (optparam, bestval) = opt.optimize(start_vals, FLAGS.dont_fit_eq,
+                                     eff_pH)
+  rate_mat = opt.ratemat.copy()
+  rate_mat[opt.unpinned_idx] = optparam[:len(opt.unpinned_idx[0])]
+  propdata = [opt.model.propagate(opt.make_pHdep(rate_mat, g_pH),
+                                  opt.make_pHdep(rate_mat, g_pH),
+                                  g_dat.eq_time).tolist()
+             for (g_pH, g_dat) in zip(opt.pH, opt.dat)]
   outf = open(FLAGS.outfile, 'w')
-  json.dump({'params': list(optparam), 'nll': bestval}, outf)
+  json.dump({'params': list(optparam), 'nll': bestval, 'propdata': propdata},
+             outf)
   outf.close()

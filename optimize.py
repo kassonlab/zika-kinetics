@@ -38,20 +38,25 @@ class ModelOptimizer(object):
   def mean_nll(self, rate_constants):
     print 'Define in subclass!'
 
-  def optimize(self, start_constants=[]):
+  def optimize(self, start_constants=[], skip_eq_pH=False, eq_pH=None):
     """Optimize parameters given data.
     args: None
     rets:
       optimized_rates
       mean_nll
     """
+    if skip_eq_pH:
+      # if this is set, don't optimize further for equilibration pH
+      eq_idx = numpy.where(self.dat[0].eq_pH)
+      self.pH = numpy.delete(self.pH, eq_idx)
+      del self.dat[eq_idx]
     if not len(start_constants):
       start_constants = numpy.ones(len(self.unpinned_idx[0]))
-      res = scipy.optimize.differential_evolution(self.mean_nll,
-                                                  bounds=[(0, 1e4), (0, 10),
-                                                          (0, 10), (0, 1),
-                                                          (0, 1)],
-                                                  disp=True)
+      res = scipy.optimize.brute(self.mean_nll,
+                                 ranges=[(0, 1e4), (0, 10),
+                                         (0, 10), (0, 1),
+                                         (0, 1)], finish=scipy.optimize.basinhopping,
+                                 disp=True)
     else:
       res = scipy.optimize.basinhopping(self.mean_nll, start_constants,
                                         disp=True)
@@ -66,7 +71,8 @@ class pHModelOptimizer(ModelOptimizer):
     # data format is JSON, key is pH, value is CDFData
     dat = json.load(open(dat_filename))
     self.pH = numpy.array(dat.keys(), dtype=float)
-    self.dat = [make_expdat(y) for y in dat.values()]
+    # make sure that dict ordering doesn't change
+    self.dat = [make_expdat(dat[str(y)]) for y in self.pH]
 
   def __init__(self, nstates, timelength, pinned, pH_dep):
     """Constructor.

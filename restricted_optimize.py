@@ -9,17 +9,20 @@ import scipy.optimize
 import optimize
 
 class RestrictedOptimizer(optimize.pHModelOptimizer):
-  def __init__(self, nstates, timelen, pinned_vals, pH_dep):
+  def __init__(self, nstates, timelen, pinned_vals, pH_dep, pinratio):
     """Constructor.
     args:
       nstates:  number of states
       timelen:  max time of CDF in sec
       pinned:  tuples of rates that are pinned and values
       pH_dep: list of rates that are pH-dependent.
+      pinratio:  tuples of rate constants that scale with another and reference.
      """
     self.eq_corr = True
     self.pinned_vals = pinned_vals
     self.eq_pH = None
+    # ideally should sanity-check pinratio values
+    self.pinratio = pinratio
     optimize.pHModelOptimizer.__init__(self, nstates, timelen,
                                        [v[:2].astype(int) for v in pinned_vals],
                                        pH_dep)
@@ -30,7 +33,9 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
   def copy(self):
     """Copy constructor."""
     new_obj = RestrictedOptimizer(self.nstates, self.model.duration,
-              [p for p in self.pinned_vals], [v for v in self.pH_dep])
+                                  [p for p in self.pinned_vals],
+                                  [v for v in self.pH_dep],
+                                  [r for r in self.pinratio])
     new_obj.pH = [p for p in self.pH]
     new_obj.dat = [d for d in self.dat]
     return new_obj
@@ -44,10 +49,13 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
     """Calculate mean NLL across models."""
     rate_matrix = self.ratemat.copy()
     rate_matrix[self.unpinned_idx] = rate_constants
+    for rat in self.pinratio:
+      # multiply out everything in pinratio
+      rate_matrix[rat[0], rat[1]] *= rate_matrix[rat[2], rat[3]]
     return numpy.sum([self.model.calc_nll(self.make_pHdep(rate_matrix, pH),
                                           self.make_pHdep(rate_matrix,
                                                           dat.eq_pH), dat,
-                                                          self.eq_corr)
+                                          self.eq_corr)
                       / (dat.num_fused + dat.num_not_fused)
                       for (pH, dat) in zip(self.pH, self.dat)])
 
@@ -55,6 +63,9 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
     """Calculate likelihood of equilibration efficiency."""
     rate_matrix = self.ratemat.copy()
     rate_matrix[self.unpinned_idx] = rate_constants
+    for rat in self.pinratio:
+      # multiply out everything in pinratio
+      rate_matrix[rat[0], rat[1]] *= rate_matrix[rat[2], rat[3]]
     eq_matrix = self.make_pHdep(rate_matrix,
                                 self.dat[0].eq_pH if not self.eq_pH else self.eq_pH)
     nll = 0
@@ -89,7 +100,7 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
     # optimize to get efficiency right at pH 7.4 to start
     eq_res = scipy.optimize.basinhopping(self.eq_efficiency, start_constants,
                                          disp=True, niter=1000,
-                                        minimizer_kwargs={'bounds': bounds})
+                                         minimizer_kwargs={'bounds': bounds})
     if skip_eq_pH:
       # if this is set, don't optimize further for equilibration pH
       eq_idx = numpy.where(self.dat[0].eq_pH)[0]
@@ -122,6 +133,8 @@ if __name__ == '__main__':
   gflags.DEFINE_integer('fus_state', 3, 'State measured experimentally')
   gflags.DEFINE_string('pinned', '', 'Transitions that are invariate. '
                        'Comma-separated list of a-b-val')
+  gflags.DEFINE_string('pinratio', '', 'Rate constants that scale with another '
+                       'rate constant. Comma-separated list of a-b-c-d')
   gflags.DEFINE_string('pHdep', '', 'Transitions that are pH-dependent')
   gflags.DEFINE_string('startvals', '', 'Starting parameters')
   gflags.DEFINE_string('eff_pH', '', 'Specify efficiency fitting pH')
@@ -132,7 +145,10 @@ if __name__ == '__main__':
                for x in FLAGS.pinned.split(',')] if FLAGS.pinned else []
   pH_parse = [numpy.array(x.split('-'), dtype=int)
               for x in FLAGS.pHdep.split(',')] if FLAGS.pHdep else []
-  opt = RestrictedOptimizer(FLAGS.nstates, FLAGS.length, pin_parse, pH_parse)
+  pinrat_parse = [numpy.array(x.split('-'), dtype=float)
+                  for x in FLAGS.pinratio.split(',')] if FLAGS.pinratio else []
+  opt = RestrictedOptimizer(FLAGS.nstates, FLAGS.length, pin_parse, pH_parse,
+                            pinrat_parse)
   if not FLAGS.eq:
     opt.eq_corr = False
   opt.load_data(FLAGS.expdata)
@@ -149,8 +165,8 @@ if __name__ == '__main__':
   propdata = [opt.model.propagate(opt.make_pHdep(rate_mat, g_pH),
                                   opt.make_pHdep(rate_mat, g_pH),
                                   g_dat.eq_time).tolist()
-             for (g_pH, g_dat) in zip(opt.pH, opt.dat)]
+              for (g_pH, g_dat) in zip(opt.pH, opt.dat)]
   outf = open(FLAGS.outfile, 'w')
   json.dump({'params': list(optparam), 'nll': bestval, 'propdata': propdata},
-             outf)
+            outf)
   outf.close()

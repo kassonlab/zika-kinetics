@@ -145,7 +145,9 @@ if __name__ == '__main__':
                for x in FLAGS.pinned.split(',')] if FLAGS.pinned else []
   pH_parse = [numpy.array(x.split('-'), dtype=int)
               for x in FLAGS.pHdep.split(',')] if FLAGS.pHdep else []
-  pinrat_parse = [numpy.array(x.split('-'), dtype=float)
+  # slightly inconsistent to zero-index pinratio here, but that avoids
+  # doing so each step in optimization
+  pinrat_parse = [numpy.array(x.split('-'), dtype=float) - 1
                   for x in FLAGS.pinratio.split(',')] if FLAGS.pinratio else []
   opt = RestrictedOptimizer(FLAGS.nstates, FLAGS.length, pin_parse, pH_parse,
                             pinrat_parse)

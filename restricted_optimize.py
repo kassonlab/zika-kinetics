@@ -9,7 +9,8 @@ import scipy.optimize
 import optimize
 
 class RestrictedOptimizer(optimize.pHModelOptimizer):
-  def __init__(self, nstates, timelen, pinned_vals, pH_dep, pinratio):
+  def __init__(self, nstates, timelen, pinned_vals, pH_dep, pinratio,
+               weight=False):
     """Constructor.
     args:
       nstates:  number of states
@@ -17,10 +18,13 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
       pinned:  tuples of rates that are pinned and values
       pH_dep: list of rates that are pH-dependent.
       pinratio:  tuples of rate constants that scale with another and reference.
+      weight:  weight likelihood by number of observations
      """
     self.eq_corr = True
     self.pinned_vals = pinned_vals
     self.eq_pH = None
+    self.weighted = weight
+    self.weights = None
     # ideally should sanity-check pinratio values
     self.pinratio = pinratio
     optimize.pHModelOptimizer.__init__(self, nstates, timelen,
@@ -35,7 +39,8 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
     new_obj = RestrictedOptimizer(self.nstates, self.model.duration,
                                   [p for p in self.pinned_vals],
                                   [v for v in self.pH_dep],
-                                  [r for r in self.pinratio])
+                                  [r for r in self.pinratio],
+                                  self.weighted)
     new_obj.pH = [p for p in self.pH]
     new_obj.dat = [d for d in self.dat]
     return new_obj
@@ -52,12 +57,14 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
     for rat in self.pinratio:
       # multiply out everything in pinratio
       rate_matrix[rat[0], rat[1]] *= rate_matrix[rat[2], rat[3]]
-    return numpy.sum([self.model.calc_nll(self.make_pHdep(rate_matrix, pH),
-                                          self.make_pHdep(rate_matrix,
-                                                          dat.eq_pH), dat,
-                                          self.eq_corr)
-                      / (dat.num_fused + dat.num_not_fused)
-                      for (pH, dat) in zip(self.pH, self.dat)])
+    nll_vals = [self.model.calc_nll(self.make_pHdep(rate_matrix, pH),
+                                    self.make_pHdep(rate_matrix, dat.eq_pH),
+                                    dat, self.eq_corr)
+                / (dat.num_fused + dat.num_not_fused)
+                for (pH, dat) in zip(self.pH, self.dat)]
+    if self.weighted:
+      return numpy.dot(nll_vals, self.weights)
+    return numpy.sum(nll_vals)
 
   def eq_efficiency(self, rate_constants, test_all=True, eq_corr=True):
     """Calculate likelihood of equilibration efficiency."""
@@ -93,6 +100,12 @@ class RestrictedOptimizer(optimize.pHModelOptimizer):
       mean_nll
     """
     self.eq_pH = eq_pH
+    if self.weighted:
+      # set up weights
+      self.weights = numpy.array([d.num_fused + d.num_not_fused
+                                  for d in self.dat])
+      # normalize
+      self.weights /= numpy.sum(self.weights)
     if not len(start_constants):
       start_constants = numpy.ones(len(self.unpinned_idx[0]))*0.01
       start_constants[0] = 3000
@@ -139,7 +152,8 @@ if __name__ == '__main__':
   gflags.DEFINE_string('startvals', '', 'Starting parameters')
   gflags.DEFINE_string('eff_pH', '', 'Specify efficiency fitting pH')
   gflags.DEFINE_bool('eq', True, 'Correct for equilibration')
-  gflags.DEFINE_bool('dont_fit_eq', False, 'Don\'t fit equilibratin pH')
+  gflags.DEFINE_bool('dont_fit_eq', False, 'Don\'t fit equilibration pH')
+  gflags.DEFINE_bool('weighting', False, 'Weight likelihood by observations')
   argv = FLAGS(sys.argv)
   pin_parse = [numpy.array(x.split('-'), dtype=float)
                for x in FLAGS.pinned.split(',')] if FLAGS.pinned else []
@@ -150,7 +164,7 @@ if __name__ == '__main__':
   pinrat_parse = [numpy.array(x.split('-'), dtype=float) - 1
                   for x in FLAGS.pinratio.split(',')] if FLAGS.pinratio else []
   opt = RestrictedOptimizer(FLAGS.nstates, FLAGS.length, pin_parse, pH_parse,
-                            pinrat_parse)
+                            pinrat_parse, FLAGS.weighting)
   if not FLAGS.eq:
     opt.eq_corr = False
   opt.load_data(FLAGS.expdata)

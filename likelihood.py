@@ -10,7 +10,7 @@ class exp_data(object):
   """Experimental data."""
   __slots__ = ('counts_by_time', 'num_fused', 'num_not_fused',
                'unique_wait_times', 'measured_state', 'pdf', 'eq_time',
-               'eq_pH')
+               'eq_pH', 'eq_T', 'cdf')
   def __init__(self):
     self.counts_by_time = []
     self.num_fused = 0
@@ -18,8 +18,10 @@ class exp_data(object):
     self.unique_wait_times = []
     self.measured_state = 0
     self.pdf = []
+    self.cdf = []
     self.eq_time = 300
     self.eq_pH = 7.4
+    self.eq_T = 310
 
 def make_expdat(dat, time_bin=1):
   """Helper function to compile exp_data.

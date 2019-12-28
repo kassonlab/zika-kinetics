@@ -14,6 +14,8 @@ from cdf_likelihood import *
 
 kBdivh = 2.084e10
 neg_kB = -1.987e-3
+dS_boost = (2.946 - 1) # multiply by log(kBdivh)/2 div 10
+dH_boost = (8839/1.1)
 
 class TempModelOptimizer(opt.ModelOptimizer):
   def load_data(self, dat_filename):
@@ -41,24 +43,32 @@ class TempModelOptimizer(opt.ModelOptimizer):
     self.T = []
     self.timelength = timelength
 
-  def make_Tdep(self, rate_constants, T):
+  def make_Tdep(self, dS_mat, dH_mat, T):
     """Ajust temperature-dependent rate constants by T."""
-    T_rates = rate_constants.copy()
-    # at the end of the day, need two parameters per rate constant: k0 and dG/R
-    # unless we really want k = 1/(betah) exp(-dG/RT)
+    T_rates = dS_mat.copy()
+    # need two parameters per rate constant
+    # unless we really want k = 1/(betah) exp(-dH/RT)exp(dS/R)
+    # dH_mat and dS_mat in reduced units of R
     for idx in self.T_dep:
       T_rates[tuple(idx-1)] = (T * kBdivh *
-                               numpy.exp(-1 * rate_constants[tuple(idx-1)] / T))
+                               numpy.exp(-1 * dH_mat[tuple(idx-1)] / T)
+                               * numpy.exp(dS_mat[tuple(idx-1)]))
     return T_rates
 
-  def mean_nll(self, rate_constants):
-    """Calculate mean NLL across models."""
+  def mean_nll(self, rate_tuple):
+    """Calculate mean NLL across models.
+    Args:
+      rate_tuple is a multidimensional array where [0] is dS and [1] is dH.
+    """
     # construct rate matrix
-    rate_matrix = numpy.zeros((self.nstates, self.nstates))
-    rate_matrix[self.unpinned_idx] = 7128*rate_constants # multiply by log(kBdivh)*300
-    return numpy.sum([self.model.model_cross_entropy(self.make_Tdep(rate_matrix, T),
+    dS_mat = numpy.zeros((self.nstates, self.nstates))
+    rlen = len(self.unpinned_idx[0])
+    dS_mat[self.unpinned_idx] = dS_boost +rate_tuple[:rlen]
+    dH_mat = numpy.zeros((self.nstates, self.nstates))
+    dH_mat[self.unpinned_idx] = dH_boost + dH_boost/10 * rate_tuple[rlen:] # multiply by log(kBdivh)*300/2
+    return numpy.sum([self.model.model_cross_entropy(self.make_Tdep(dS_mat, dH_mat, T),
                                                      dat.cdf, dat.measured_state,
-                                                     self.make_Tdep(rate_matrix, dat.eq_T),
+                                                     self.make_Tdep(dS_mat, dH_mat, dat.eq_T),
                                                      dat.eq_time)
                       for (T, dat) in zip(self.T, self.dat)])
 
@@ -94,7 +104,7 @@ class RestrictedTOptimizer(TempModelOptimizer):
     new_obj = RestrictedTOptimizer(self.nstates, self.model.duration,
                                    [p for p in self.pinned_vals],
                                    [v for v in self.T_dep],
-                                   [r for r in self.pinratio],
+                                   [rv for rv in self.pinratio],
                                    self.weighted)
     new_obj.T = [p for p in self.T]
     new_obj.dat = [d for d in self.dat]
@@ -105,38 +115,49 @@ class RestrictedTOptimizer(TempModelOptimizer):
     for dat in self.dat:
       dat.measured_state = state_idx -1
 
-  def mean_nll(self, rate_constants):
-    """Calculate mean NLL across models."""
-    rate_matrix = self.ratemat.copy()
-    rate_matrix[self.unpinned_idx] = 7128*rate_constants # multiply by log(kBdivh)*300
+  def mean_nll(self, rate_tuple):
+    """Calculate mean NLL across models.
+    Args:
+      rate_tuple is a multidimensional array where [0] is dS and [1] is dH.
+    """
+    dS_mat = numpy.zeros((self.nstates, self.nstates))
+    rlen = len(self.unpinned_idx[0])  # because unpinned_idx is a tuple
+    dS_mat[self.unpinned_idx] = dS_boost + rate_tuple[:rlen]
+    dH_mat = numpy.zeros((self.nstates, self.nstates))
+    dH_mat[self.unpinned_idx] = dH_boost + dH_boost/10 * rate_tuple[rlen:]
     for rat in self.pinratio:
       # multiply out everything in pinratio
       rat = rat.astype(int)
-      rate_matrix[rat[0], rat[1]] = rate_matrix[rat[2], rat[3]]
-    nll_vals = [self.model.quantile_err(self.make_Tdep(rate_matrix, T),
-                                       dat.cdf, dat.measured_state,
-                                       self.make_Tdep(rate_matrix, dat.eq_T),
-                                       dat.eq_time)
+      dS_mat[rat[0], rat[1]] = dS_mat[rat[2], rat[3]]
+      dH_mat[rat[0], rat[1]] = dH_mat[rat[2], rat[3]]
+    nll_vals = [self.model.quantile_err(self.make_Tdep(dS_mat, dH_mat, T),
+                                        dat.cdf, dat.measured_state,
+                                        self.make_Tdep(dS_mat, dH_mat, dat.eq_T),
+                                        dat.eq_time)
                 for (T, dat) in zip(self.T, self.dat)]
     if self.weighted:
       return numpy.dot(nll_vals, self.weights)
     return numpy.sum(nll_vals)
 
-  def eq_efficiency(self, rate_constants, test_all=True, eq_corr=True):
+  def eq_efficiency(self, rate_tuple, test_all=True, eq_corr=True):
     """Calculate likelihood of equilibration efficiency."""
-    rate_matrix = self.ratemat.copy()
-    rate_matrix[self.unpinned_idx] = rate_constants
+    dS_mat = numpy.zeros((self.nstates, self.nstates))
+    rlen = len(self.unpinned_idx[0])
+    dS_mat[self.unpinned_idx] = dS_boost + rate_tuple[:rlen]
+    dH_mat = numpy.zeros((self.nstates, self.nstates))
+    dH_mat[self.unpinned_idx] = dH_boost + dH_boost/10 * rate_tuple[rlen:]
     for rat in self.pinratio:
-      rat = rat.astype(int)
       # multiply out everything in pinratio
-      rate_matrix[rat[0], rat[1]] = rate_matrix[rat[2], rat[3]]
-    eq_matrix = self.make_Tdep(rate_matrix,
+      rat = rat.astype(int)
+      dS_mat[rat[0], rat[1]] = dS_mat[rat[2], rat[3]]
+      dH_mat[rat[0], rat[1]] = dH_mat[rat[2], rat[3]]
+    eq_matrix = self.make_Tdep(dS_mat, dH_mat,
                                self.dat[0].eq_T if not self.eq_T else self.eq_T)
     nll = 0
     for (T, dat) in zip(self.T, self.dat):
       target_T = self.eq_T if self.eq_T else dat.eq_T
       if test_all or (T == target_T):
-        cur_matrix = self.make_Tdep(rate_matrix, T)
+        cur_matrix = self.make_Tdep(dS_mat, dH_mat, T)
         vals = self.model.propagate(cur_matrix, eq_matrix, dat.eq_time)
         # subtract out anything that fused during equilibration
         sub_val = vals[dat.measured_state, 0] if eq_corr else 0
@@ -165,13 +186,17 @@ class RestrictedTOptimizer(TempModelOptimizer):
       # normalize
       self.weights /= numpy.sum(self.weights)
     if not len(start_constants):
-      start_constants = numpy.ones(len(self.unpinned_idx[0]))*0.01
+      start_constants = numpy.ones(2*len(self.unpinned_idx[0]))*0.01
       start_constants[0] = 3000
-    bounds = [(0, 1000*v) for v in start_constants]
+    else:
+      start_constants = numpy.array(start_constants)
+    # for dS and dH:
+    start_constants = start_constants.reshape((2, -1))
+    bounds = [(0, 10*v) for v in numpy.nditer(start_constants)]
     if not skip_pre_opt:
       # optimize to get efficiency right at 310 K to start
       eq_res = scipy.optimize.basinhopping(self.eq_efficiency, start_constants,
-                                           disp=True, niter=1000,
+                                           disp=True, niter=1000, stepsize=0.5,
                                            minimizer_kwargs={'bounds': bounds})
       posteq = eq_res.x
     else:
@@ -192,18 +217,21 @@ class RestrictedTOptimizer(TempModelOptimizer):
                                         interval=nsteps/20,
                                         disp=True, niter=nsteps, stepsize=0.1,
                                         minimizer_kwargs={'bounds': bounds,
-                                            'options': {'maxiter': 1000}})
+                                                          'options': {'maxiter': 1000}})
     print "After equilibration:"
     print posteq
     print "Final:"
     print res
-    end_matrix = numpy.zeros((self.nstates, self.nstates))
-    end_matrix[self.unpinned_idx] = 7128*res.x
+    dS_end = numpy.zeros((self.nstates, self.nstates))
+    dS_end = [self.unpinned_idx] = dS_boost + res.x[0]
+    dH_end = numpy.zeros((self.nstates, self.nstates))
+    dH_end[self.unpinned_idx] = dH_boost + dH_boost/10 * res.x[1]
     for rat in self.pinratio:
       # multiply out everything in pinratio
       rat = rat.astype(int)
-      end_matrix[rat[0], rat[1]] = end_matrix[rat[2], rat[3]]
-    print self.make_Tdep(end_matrix, 310)
+      dS_end[rat[0], rat[1]] = dS_end[rat[2], rat[3]]
+      dH_end[rat[0], rat[1]] = dH_end[rat[2], rat[3]]
+    print self.make_Tdep(dS_end, dH_end, 310)
     import pdb; pdb.set_trace()
     return (res.x, res.fun)
 
@@ -345,10 +373,17 @@ if __name__ == '__main__':
   eff_T = float(FLAGS.eff_T) if FLAGS.eff_T else None
   (optparam, bestval) = opt.optimize(start_vals, False,
                                      eff_T, FLAGS.dont_fit_eq, FLAGS.nsteps)
-  rate_mat = opt.ratemat.copy()
-  rate_mat[opt.unpinned_idx] = optparam[:len(opt.unpinned_idx[0])]
-  propdata = [opt.model.propagate(opt.make_Tdep(rate_mat, g_T),
-                                  opt.make_Tdep(rate_mat, g_T),
+  dS_opt = opt.ratemat.copy()
+  dS_opt = [opt.unpinned_idx] = dS_boost + optparam[0, :len(opt.unpinned_idx[0])]
+  dH_opt = opt.ratemat.copy()
+  dH_opt[opt.unpinned_idx] = dH_boost + dH_boost/10 * optparam[1, :len(opt.unpinned_idx[0])]
+  for r in pinrat_parse:
+    # multiply out everything in pinratio
+    r = r.astype(int)
+    dS_opt[r[0], r[1]] = dS_opt[r[2], r[3]]
+    dH_opt[r[0], r[1]] = dH_opt[r[2], r[3]]
+  propdata = [opt.model.propagate(opt.make_Tdep(dS_opt, dH_opt, g_T),
+                                  opt.make_Tdep(dS_opt, dH_opt, g_T),
                                   g_dat.eq_time).tolist()
               for (g_T, g_dat) in zip(opt.T, opt.dat)]
   outf = open(FLAGS.outfile, 'w')

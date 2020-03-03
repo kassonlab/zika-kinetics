@@ -192,7 +192,7 @@ class RestrictedTOptimizer(TempModelOptimizer):
       start_constants = numpy.array(start_constants)
     # for dS and dH:
     start_constants = start_constants.reshape((2, -1))
-    bounds = [(0, 10*v) for v in numpy.nditer(start_constants)]
+    bounds = [(-10*v, 10*v) for v in numpy.nditer(start_constants)]
     if not skip_pre_opt:
       # optimize to get efficiency right at 310 K to start
       eq_res = scipy.optimize.basinhopping(self.eq_efficiency, start_constants,
@@ -222,18 +222,19 @@ class RestrictedTOptimizer(TempModelOptimizer):
     print posteq
     print "Final:"
     print res
+    rlen = len(self.unpinned_idx[0])
     dS_end = numpy.zeros((self.nstates, self.nstates))
-    dS_end = [self.unpinned_idx] = dS_boost + res.x[0]
+    dS_end[self.unpinned_idx] = dS_boost + res.x[:rlen]
     dH_end = numpy.zeros((self.nstates, self.nstates))
-    dH_end[self.unpinned_idx] = dH_boost + dH_boost/10 * res.x[1]
+    dH_end[self.unpinned_idx] = dH_boost + dH_boost/10 * res.x[rlen:]
     for rat in self.pinratio:
       # multiply out everything in pinratio
       rat = rat.astype(int)
       dS_end[rat[0], rat[1]] = dS_end[rat[2], rat[3]]
       dH_end[rat[0], rat[1]] = dH_end[rat[2], rat[3]]
     print self.make_Tdep(dS_end, dH_end, 310)
-    import pdb; pdb.set_trace()
-    return (res.x, res.fun)
+    # import pdb; pdb.set_trace()
+    return ((dS_end, dH_end), res.fun)
 
 # routines to convert data
 
@@ -373,10 +374,10 @@ if __name__ == '__main__':
   eff_T = float(FLAGS.eff_T) if FLAGS.eff_T else None
   (optparam, bestval) = opt.optimize(start_vals, False,
                                      eff_T, FLAGS.dont_fit_eq, FLAGS.nsteps)
-  dS_opt = opt.ratemat.copy()
-  dS_opt = [opt.unpinned_idx] = dS_boost + optparam[0, :len(opt.unpinned_idx[0])]
-  dH_opt = opt.ratemat.copy()
-  dH_opt[opt.unpinned_idx] = dH_boost + dH_boost/10 * optparam[1, :len(opt.unpinned_idx[0])]
+  dS_opt = optparam[0]
+  dH_opt = optparam[1]
+  print dS_opt
+  print dH_opt
   for r in pinrat_parse:
     # multiply out everything in pinratio
     r = r.astype(int)
@@ -387,6 +388,8 @@ if __name__ == '__main__':
                                   g_dat.eq_time).tolist()
               for (g_T, g_dat) in zip(opt.T, opt.dat)]
   outf = open(FLAGS.outfile, 'w')
-  json.dump({'params': list(optparam), 'nll': bestval, 'propdata': propdata},
+  json.dump({'ds_opt': dS_opt.tolist(), 'dh_opt': dH_opt.tolist(),
+             '310_vals': opt.make_Tdep(dS_opt, dH_opt, 310).tolist(),
+             'nll': bestval, 'propdata': propdata},
             outf)
   outf.close()

@@ -18,7 +18,7 @@ dS_boost = (2.946 - 1) # multiply by log(kBdivh)/2 div 10
 dH_boost = (8839/1.1)
 
 class TempModelOptimizer(opt.ModelOptimizer):
-  def load_data(self, dat_filename):
+  def load_data(self, dat_filename, normalize=False):
     """Load and parse reference data.
     args:  dat_filename:  path to mat files.
     """
@@ -27,7 +27,7 @@ class TempModelOptimizer(opt.ModelOptimizer):
     for datafile in glob.glob('%s/*.mat' % dat_filename):
       dat = scipy.io.loadmat(datafile)
       self.T.append(dat['tval'] + 273)
-      self.dat.append(make_expdat(dat, self.timelength))
+      self.dat.append(make_expdat(dat, self.timelength, normalize=normalize))
 
   def __init__(self, nstates, timelength, pinned, T_dep):
     """Constructor.
@@ -305,9 +305,14 @@ def get_raw_data(data_path=None, fixed_train=False, fraction_test=0.1):
   return ((train_data, train_inp), (valid_data, valid_inp),
           (test_data, test_inp), vocabulary)
 
-def make_expdat(dat, t_max, dt=1, FusionState=4):
+def make_expdat(dat, t_max, dt=1, FusionState=4, normalize=False):
   """Helper function to compile exp_data.
-    args:  dat:  dict of data objects.
+    args:
+      dat:  dict of data objects.
+      t_max:  maximum time
+      dt:  time step interval
+      FusionState:  which state is fused (sink)
+      normalize:  normalize CDF curves
     rets:  expdat:  exp_data object.
   """
   res = exp_data()
@@ -322,7 +327,10 @@ def make_expdat(dat, t_max, dt=1, FusionState=4):
   binned_times = numpy.round(dat['fusiontimes'] * dt) / dt
   res.unique_wait_times, res.counts_by_time = numpy.unique(binned_times,
                                                            return_counts=True)
-  res.cdf = ecdf(dat['fusiontimes'], t_max, dt) * dat['efficiency'].flatten()
+  if normalize:
+    res.cdf = ecdf(dat['fusiontimes'], t_max, dt)
+  else:
+    res.cdf = ecdf(dat['fusiontimes'], t_max, dt) * dat['efficiency'].flatten()
   res.eq_time = 0  # hard-code; was 300
   res.eq_T = 310
   return res
@@ -350,6 +358,7 @@ if __name__ == '__main__':
   gflags.DEFINE_boolean('weighting', False,
                         'Weight likelihood by observations')
   gflags.DEFINE_boolean('dont_fit_eq', False, 'Skip fitting at equil')
+  gflags.DEFINE_boolean('normcdf', False, 'Normalize CDFs for fitting')
   gflags.DEFINE_string('outfile', 'res.json', 'Output parameters')
   argv = FLAGS(sys.argv)
 
@@ -365,7 +374,7 @@ if __name__ == '__main__':
                              pinrat_parse, FLAGS.weighting)
   if not FLAGS.eq:
     opt.eq_corr = False
-  opt.load_data(FLAGS.expdata)
+  opt.load_data(FLAGS.expdata, FLAGS.normcdf)
   opt.set_measured_state(FLAGS.fus_state)
   if FLAGS.startvals:
     start_vals = numpy.array(FLAGS.startvals.split(','), dtype=float)

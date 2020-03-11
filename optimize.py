@@ -29,7 +29,7 @@ class ModelOptimizer(object):
     self.optmethod = 'BFGS'
     self.dat = []
 
-  def load_data(self, dat_filename):
+  def load_data(self, dat_filename, normalize=False):
     """Load experimental reference data."""
     # self.dat = loadmat(dat_filename)
     # leave this to be subclassed
@@ -64,7 +64,7 @@ class ModelOptimizer(object):
     return (res.x, res.fun)
 
 class pHModelOptimizer(ModelOptimizer):
-  def load_data(self, dat_filename):
+  def load_data(self, dat_filename, normalize=False):
     """Load and parse reference data.
     args:  dat_filename:  name of mat file.
     """

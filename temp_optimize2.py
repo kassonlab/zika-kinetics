@@ -42,6 +42,7 @@ class TempModelOptimizer(opt.ModelOptimizer):
     self.T_dep = T_dep
     self.T = []
     self.timelength = timelength
+    self.loss_fn = self.model.model_cross_entropy
 
   def make_Tdep(self, dS_mat, dH_mat, T):
     """Ajust temperature-dependent rate constants by T."""
@@ -66,10 +67,10 @@ class TempModelOptimizer(opt.ModelOptimizer):
     dS_mat[self.unpinned_idx] = dS_boost +rate_tuple[:rlen]
     dH_mat = numpy.zeros((self.nstates, self.nstates))
     dH_mat[self.unpinned_idx] = dH_boost + dH_boost/10 * rate_tuple[rlen:] # multiply by log(kBdivh)*300/2
-    return numpy.sum([self.model.model_cross_entropy(self.make_Tdep(dS_mat, dH_mat, T),
-                                                     dat.cdf, dat.measured_state,
-                                                     self.make_Tdep(dS_mat, dH_mat, dat.eq_T),
-                                                     dat.eq_time)
+    return numpy.sum([self.loss_fn(self.make_Tdep(dS_mat, dH_mat, T),
+                                   dat.cdf, dat.measured_state,
+                                   self.make_Tdep(dS_mat, dH_mat, dat.eq_T),
+                                   dat.eq_time)
                       for (T, dat) in zip(self.T, self.dat)])
 
 class RestrictedTOptimizer(TempModelOptimizer):
@@ -96,8 +97,24 @@ class RestrictedTOptimizer(TempModelOptimizer):
                                 [v[:2].astype(int) + 1 for v in pinratio],
                                 T_dep)
     self.ratemat = numpy.zeros((nstates, nstates))
+    self.loss_fn = self.model.quantile_err
     for v in pinned_vals:
       self.ratemat[int(v[0]) - 1, int(v[1]) - 1] = v[2]
+
+  def set_loss_fn(self, lossfn):
+    """Allow non-default loss function."""
+    if lossfn == 'quantile_err':
+      self.loss_fn = self.model.quantile_err
+    elif lossfn == 'cdf_mse':
+      self.loss_fn = self.model.model_mse
+    elif type(lossfn) == type(numpy.sum):
+      # if lossfn is a function, assign
+      self.loss_fn = lossfn
+    elif type(lossfn) == type(self.__init__):
+      # if lossfn is an instancemethod, assign
+      self.loss_fn = lossfn
+    else:
+      print("Error.  Unrecognized loss function.")
 
   def copy(self):
     """Copy constructor."""
@@ -130,10 +147,10 @@ class RestrictedTOptimizer(TempModelOptimizer):
       rat = rat.astype(int)
       dS_mat[rat[0], rat[1]] = dS_mat[rat[2], rat[3]]
       dH_mat[rat[0], rat[1]] = dH_mat[rat[2], rat[3]]
-    nll_vals = [self.model.quantile_err(self.make_Tdep(dS_mat, dH_mat, T),
-                                        dat.cdf, dat.measured_state,
-                                        self.make_Tdep(dS_mat, dH_mat, dat.eq_T),
-                                        dat.eq_time)
+    nll_vals = [self.loss_fn(self.make_Tdep(dS_mat, dH_mat, T),
+                             dat.cdf, dat.measured_state,
+                             self.make_Tdep(dS_mat, dH_mat, dat.eq_T),
+                             dat.eq_time)
                 for (T, dat) in zip(self.T, self.dat)]
     if self.weighted:
       return numpy.dot(nll_vals, self.weights)
@@ -350,6 +367,7 @@ if __name__ == '__main__':
   gflags.DEFINE_string('startvals', '',
                        'Starting values for nonzero rate constants')
   gflags.DEFINE_string('eff_T', '310', 'Temperature for initial fit')
+  gflags.DEFINE_string('loss_fn', 'quantile_err', 'Loss function to use')
   gflags.DEFINE_boolean('eq', False, 'Run equilibration')
   gflags.DEFINE_integer('fus_state', 4, 'Fused state')
   gflags.DEFINE_integer('nstates', 4, 'Number of states in model')
@@ -372,6 +390,7 @@ if __name__ == '__main__':
                   for x in FLAGS.pinratio.split(',')] if FLAGS.pinratio else []
   opt = RestrictedTOptimizer(FLAGS.nstates, FLAGS.length, pin_parse, T_parse,
                              pinrat_parse, FLAGS.weighting)
+  opt.set_loss_fn(FLAGS.loss_fn)
   if not FLAGS.eq:
     opt.eq_corr = False
   opt.load_data(FLAGS.expdata, FLAGS.normcdf)
